@@ -4,14 +4,17 @@ import json
 import stat
 import zipfile
 from datetime import datetime
+import tkinter as tk
+from tkinter import scrolledtext, messagebox, filedialog, simpledialog
 
 LOG_FILE = "backup.log"
 
 def log_message(message):
     time_stamp = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
-    with open(LOG_FILE, "a", encoding = "utf-8") as log:
+    with open(LOG_FILE, "a", encoding = "utf-8") as log:    
         log.write(f"[{time_stamp}] {message}\n")
-    print(message)
+    log_text.insert(tk.END, f"[{time_stamp}] {message}\n" )
+    log_text.see(tk.END)
 
 with open("config.json", "r") as f:
     config = json.load(f)
@@ -20,6 +23,12 @@ USER_HOME = os.path.expanduser("~")
 SOURCE = config["source"].replace("%USER_HOME%", USER_HOME)
 DEST = config["destination"]
 
+def select_source():
+    global SOURCE
+    SOURCE = filedialog.askdirectory()
+    if SOURCE:
+        log_message(f"Вибрана директорія: {SOURCE}")
+
 def create_backup():
     if not os.path.exists(DEST):
         os.makedirs(DEST)
@@ -27,6 +36,7 @@ def create_backup():
     timeTamp = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
     backup_folder = os.path.join(DEST, f"backup_{timeTamp}")
     os.makedirs(backup_folder)
+
     log_message(f"Створення резервної копії у {backup_folder}")
 
     for root, dirs, files in os.walk(SOURCE):
@@ -54,8 +64,8 @@ def remove_readonly(func, path, exc_info):
 
 def remove_folder(folder_path):
     try:
-        shutil.rmtree(folder_path, onerror=remove_readonly)
-        log_message(f"Архів {folder_path} видалено")
+        shutil.rmtree(folder_path, onexc=remove_readonly)
+        log_message(f"Папку {folder_path} видалено")
     except Exception as e:
         log_message(f"Помилка при видаленні {folder_path}: {e}")
 
@@ -63,12 +73,11 @@ def list_backups():
     backups = sorted(os.listdir(DEST), reverse = True)
     if not backups:
         log_message("Резервні копії відсутні")
-        return[]
+        return []
     
     log_message("Список резервних копій: ")
-    for i, backup in enumerate(backups, 1):
-        print(f"{i}. {backup}")
-
+    backups_array = [f"{i + 1}. {backup}" for i, backup in enumerate(backups)]
+    log_message("\n".join(backups_array))
     return backups
 
 def restore_backup():
@@ -76,16 +85,12 @@ def restore_backup():
     if not backups:
         return
 
-    try:
-        choice = int(input("Введіть номер резервної копії: ")) - 1
-        if choice < 0 or choice >= len(backups):
-            log_message("Такої копії не існує")
-            return
-    except ValueError:
-        log_message("Введіть число!")
+    choice = simpledialog.askinteger("Вибір резервної копії", "Введіть номер резервної копії:", minvalue=1, maxvalue=len(backups))
+
+    if choice is None:
         return
-        
-    backup_folder = os.path.join(DEST, backups[choice])
+
+    backup_folder = os.path.join(DEST, backups[choice - 1])
     
     if backup_folder.endswith('.zip'):
         temp_extract_dir = os.path.join(DEST, f"temp_restore_{datetime.now().strftime('%Y-%m-%d_%H_%M_%S')}")
@@ -96,40 +101,50 @@ def restore_backup():
             zip_ref.extractall(temp_extract_dir)
         
         log_message(f"Файли успішно розпаковані в {temp_extract_dir}")
-        extracted_files = os.listdir(temp_extract_dir)
-        if not extracted_files:
-            log_message("Помилка: після розпаковки файли не знайдено!")
-            return
-        else:
-            log_message(f"Знайдено файли: {extracted_files}")
-
         backup_folder = temp_extract_dir
     
-    log_message(f"Відновлення файлів з {backup_folder} у {SOURCE}")
+    restore_option = messagebox.askyesno("Відновлення", "Відновити всю директорію? (Ні - окремі файли)")
 
+    if restore_option:
+        log_message(f"Відновлення всієї директорії з {backup_folder} у {SOURCE}")
+        for root, dirs, files in os.walk(backup_folder):
+            for file in files:
+                src_file = os.path.join(root, file)
+                relative_path = os.path.relpath(root, backup_folder)
+                dest_folder = os.path.join(SOURCE, relative_path)
+                dest_file = os.path.join(dest_folder, file)
+
+                if not os.path.exists(dest_folder):
+                    os.makedirs(dest_folder)
+
+                try:
+                    shutil.copy2(src_file, dest_file)
+                    log_message(f"Відновлено: {file}")
+                except PermissionError:
+                    log_message(f"Немає доступу: {file}")
+
+        remove_folder(temp_extract_dir)
+        log_message("Операція відновлення завершена")
+        return
+
+    # Якщо обрано відновлення окремих файлів
     files_list = []
-
     for root, dirs, files in os.walk(backup_folder):
         for file in files:
             files_list.append(os.path.relpath(os.path.join(root, file), backup_folder))
-        
+
     if not files_list:
         log_message("У цій директорії відсутні файли")
         return
-        
-    print("\nСписок файлів:")
-    for i, file in enumerate(files_list, 1):
-        print(f"{i}. {file}")
-        
-    selected_files = input("\nВведіть номери файлів для відновлення через кому, або напишіть all якщо хочете, щоб відновилася вся директорія\n")
+
+    selected_files = simpledialog.askstring("Вибір файлів", "Введіть номери файлів через кому або 'all' для всіх:\n" + "\n".join(f"{i + 1}. {f}" for i, f in enumerate(files_list)))
     
     if selected_files.lower() == "all":
         selected_files = files_list
-
     else:
         try:
-            selected_files = [int(num.strip()) for num in selected_files.split(",") if num.strip().isdigit()]
-            selected_files = [files_list[i - 1] for i in selected_files if 0 < i <= len(files_list)]
+            selected_files = [int(num.strip()) - 1 for num in selected_files.split(",") if num.strip().isdigit()]
+            selected_files = [files_list[i] for i in selected_files if 0 <= i < len(files_list)]
         except ValueError:
             log_message("Номера файлів введені некоректно")
             return
@@ -138,11 +153,13 @@ def restore_backup():
             log_message("Жоден файл не вибрано")
             return
 
+    log_message(f"Відновлення вибраних файлів з {backup_folder} у {SOURCE}")
+
     for file in selected_files:
         src_file = os.path.join(backup_folder, file)
         dest_file = os.path.join(SOURCE, file)
-
         dest_folder = os.path.dirname(dest_file)
+
         if not os.path.exists(dest_folder):
             os.makedirs(dest_folder)
 
@@ -152,22 +169,23 @@ def restore_backup():
         except PermissionError:
             log_message(f"Немає доступу: {file}")
 
-
     remove_folder(temp_extract_dir)
-
     log_message("Операція відновлення завершена")
 
-def main():
-    print("Вітаю у програмі резервного копіювання файлів! Для початку виберіть дію:\n1. Створення резервної копії\n2. Відновлення файлів із уже існуючої резервної копії")
+root = tk.Tk()
+root.title("Резервне копіювання")
+root.geometry("500x400")
 
-    try:
-        choice = int(input("Введіть 1 або 2: "))
-        if choice == 1:
-            create_backup()
-        elif choice == 2:
-            restore_backup()
-        else:
-            log_message("Введено неправильно число")
-    except ValueError:
-        log_message("Введіть число!")
-main()
+btn_select_source = tk.Button(root, text="Вибрати директорію", command=select_source)
+btn_select_source.pack(pady=10)
+
+btn_backup= tk.Button(root, text="Створити резервну копію", command=create_backup)
+btn_backup.pack(pady = 10)
+
+btn_restore = tk.Button(root, text="Відновити резервну копію", command=restore_backup)
+btn_restore.pack(pady=10)
+
+log_text = scrolledtext.ScrolledText(root, width = 60, height = 15)
+log_text.pack(pady = 10)
+
+root.mainloop()
