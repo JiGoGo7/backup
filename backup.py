@@ -29,6 +29,13 @@ def select_source():
     if SOURCE:
         log_message(f"Вибрана директорія: {SOURCE}")
 
+def select_dest():
+    global DEST
+    DEST = filedialog.askdirectory()
+    if DEST:
+        log_message(f"Вибрана директорія: {DEST}")
+
+
 def create_backup():
     if not os.path.exists(DEST):
         os.makedirs(DEST)
@@ -127,7 +134,6 @@ def restore_backup():
         log_message("Операція відновлення завершена")
         return
 
-    # Якщо обрано відновлення окремих файлів
     files_list = []
     for root, dirs, files in os.walk(backup_folder):
         for file in files:
@@ -176,8 +182,11 @@ root = tk.Tk()
 root.title("Резервне копіювання")
 root.geometry("500x400")
 
-btn_select_source = tk.Button(root, text="Вибрати директорію", command=select_source)
+btn_select_source = tk.Button(root, text="Вибрати директорію для копіювання", command=select_source)
 btn_select_source.pack(pady=10)
+
+btn_select_dest = tk.Button(root, text="Вибрати директорію для бекапів", command=select_dest)
+btn_select_dest.pack(pady=10)
 
 btn_backup= tk.Button(root, text="Створити резервну копію", command=create_backup)
 btn_backup.pack(pady = 10)
